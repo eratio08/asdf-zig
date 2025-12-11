@@ -7,17 +7,49 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 download() {
   local download_path="$1"
   local version="$2"
-  local zig_outfile="${download_path}/zig-${version}.tar.xz"
-  local zls_outfile="${download_path}/zls-${version}.tar.xz"
+
   mkdir -p "$download_path"
 
-  "${SCRIPT_DIR}/../lib/utils.py" download "${version}" "${zig_outfile}" "${zls_outfile}"
-  tar -xf "$zig_outfile" -C "$download_path" --strip-components=1
-  if [ -f "$zls_outfile" ]; then
-    tar -xf "$zls_outfile" -C "$download_path"
-    rm "$zls_outfile"
+  # Capture output from utils.py to detect archive format
+  local download_output
+  download_output=$("${SCRIPT_DIR}/../lib/utils.py" download "${version}" "${download_path}/zig-archive" "${download_path}/zls-archive")
+
+  # Extract archive extension from output
+  local archive_ext
+  archive_ext=$(echo "$download_output" | grep "^ARCHIVE_EXT=" | cut -d= -f2)
+
+  # Default to .tar.xz if not specified
+  if [ -z "$archive_ext" ]; then
+    archive_ext=".tar.xz"
+  fi
+
+  local zig_outfile="${download_path}/zig-archive${archive_ext}"
+  local zls_outfile="${download_path}/zls-archive${archive_ext}"
+
+  # Extract Zig archive based on format
+  if [ "$archive_ext" = ".zip" ]; then
+    unzip -q "$zig_outfile" -d "$download_path"
+    # Find the extracted directory and move contents up
+    local extracted_dir
+    extracted_dir=$(find "$download_path" -maxdepth 1 -type d -name "zig-*" | head -n1)
+    if [ -n "$extracted_dir" ]; then
+      mv "$extracted_dir"/* "$download_path"/
+      rmdir "$extracted_dir"
+    fi
+  else
+    tar -xf "$zig_outfile" -C "$download_path" --strip-components=1
   fi
   rm "$zig_outfile"
+
+  # Extract ZLS archive if it exists
+  if [ -f "$zls_outfile" ]; then
+    if [ "$archive_ext" = ".zip" ]; then
+      unzip -q "$zls_outfile" -d "$download_path"
+    else
+      tar -xf "$zls_outfile" -C "$download_path"
+    fi
+    rm "$zls_outfile"
+  fi
 }
 
 download "$ASDF_DOWNLOAD_PATH" "$ASDF_INSTALL_VERSION"
