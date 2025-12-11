@@ -81,11 +81,14 @@ def all_versions():
     index = fetch_index()
     versions = [k for k in index.keys() if k != 'master']
     versions.sort(key=lambda v: tuple(map(int, v.split('.'))))
+    versions.append('master')  # Add master at the end
     return versions
 
 
 def download_and_check(url, out_file, expected_shasum, total_size):
-    logging.info(f'Begin download tarball({format_size(total_size)}) from {url} to {out_file}...')
+    logging.info(
+        f'Begin download tarball({format_size(total_size)}) from {url} to {out_file}...'
+    )
     chunk_size = 1024 * 1024 * 2  # 2M chunks
     sha256_hash = hashlib.sha256()
     with http_get(url) as response:
@@ -112,10 +115,14 @@ def download_and_check(url, out_file, expected_shasum, total_size):
         )
 
 
-def download_tarball(out_file, tarball_info, use_mirror=True):
+def download_tarball(out_file, tarball_info, version=None, use_mirror=True):
     url = tarball_info['tarball']
     expected_shasum = tarball_info['shasum']
     total_size = int(tarball_info['size'])
+
+    # Skip mirrors for master version
+    if version == 'master':
+        use_mirror = False
 
     if use_mirror is False:
         download_and_check(url, out_file, expected_shasum, total_size)
@@ -154,14 +161,31 @@ def download(version, zig_outfile, zls_outfile):
         raise Exception(f'No tarball link for {link_key} in {version}')
 
     tarball_info = links[link_key]
-    download_tarball(zig_outfile, tarball_info)
+    download_tarball(zig_outfile, tarball_info, version=version)
 
-    zls_links = query_zls(version)
-    if link_key not in zls_links:
+    # Print the archive extension so the download script knows how to extract
+    tarball_url = tarball_info['tarball']
+    if tarball_url.endswith('.zip'):
+        print('ARCHIVE_EXT=.zip')
+    else:
+        print('ARCHIVE_EXT=.tar.xz')
+
+    # For master, use the actual version string from the index for ZLS query
+    zls_version = links.get('version', version) if version == 'master' else version
+
+    try:
+        zls_links = query_zls(zls_version)
+        if link_key not in zls_links:
+            return
+
+        tarball_info = zls_links[link_key]
+        download_tarball(zls_outfile, tarball_info, version=version, use_mirror=False)
+    except Exception as e:
+        # ZLS might not be available for master/dev builds
+        logging.warning(
+            f'ZLS download failed (this is expected for master/dev versions): {e}'
+        )
         return
-
-    tarball_info = zls_links[link_key]
-    download_tarball(zls_outfile, tarball_info, use_mirror=False)
 
 
 def main(args):
@@ -171,7 +195,9 @@ def main(args):
         print(' '.join(versions))
     elif command == 'latest-version':
         versions = all_versions()
-        print(versions[-1])
+        # Exclude master from latest-version
+        stable_versions = [v for v in versions if v != 'master']
+        print(stable_versions[-1])
     elif command == 'download':
         download(args[1], args[2], args[3])
     else:

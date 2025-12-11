@@ -40,6 +40,9 @@ asdf install zig 0.15.1
 # or install latest tagged version with
 asdf install zig latest
 
+# or install the latest development (master) version
+asdf install zig master
+
 # Set a version globally (on your ~/.tool-versions file)
 asdf set --home zig latest
 
